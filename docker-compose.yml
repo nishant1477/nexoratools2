@@ -1,0 +1,151 @@
+# NexoraTools - production-style stack.
+#   1. sh scripts/init-env.sh          (creates .env with generated secrets)
+#   2. docker compose up -d --build
+#   3. open ${PUBLIC_URL} (default http://localhost:8080)
+#
+# Only nginx is published. Postgres, Redis, API and web live on the private compose network.
+# The API and the worker MUST mount the same storage volume (STORAGE_DIR) - uploads are written by the API
+# and read by the worker, outputs the other way round.
+
+name: nexora
+
+x-app-env: &app-env
+  NODE_ENV: production
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  DATABASE_URL: postgresql://${POSTGRES_USER:-nexora}:${POSTGRES_PASSWORD:?run scripts/init-env.sh (POSTGRES_PASSWORD missing)}@postgres:5432/${POSTGRES_DB:-nexora}
+  REDIS_URL: redis://redis:6379
+  STORAGE_DIR: /data/storage
+  JWT_SECRET: ${JWT_SECRET:?run scripts/init-env.sh (JWT_SECRET missing)}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexora}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?run scripts/init-env.sh (POSTGRES_PASSWORD missing)}
+      POSTGRES_DB: ${POSTGRES_DB:-nexora}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # BullMQ requires noeviction so queued jobs are never dropped under memory pressure.
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory-policy", "noeviction"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # One-shot: applies pending Prisma migrations, then exits. api and worker wait for it.
+  migrate:
+    build: { context: ., dockerfile: docker/Dockerfile.api }
+    image: nexora-api
+    restart: "no"
+    command: ["npx", "prisma", "migrate", "deploy", "--schema", "packages/database/prisma/schema.prisma"]
+    environment:
+      <<: *app-env
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile.api }
+    image: nexora-api
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      WEB_ORIGIN: ${PUBLIC_URL:-http://localhost:8080}
+      TRUST_PROXY: "true"
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      SESSION_COOKIE_NAME: ${SESSION_COOKIE_NAME:-nexora_session}
+      SESSION_TTL_HOURS: ${SESSION_TTL_HOURS:-168}
+      FILE_RETENTION_MINUTES: ${FILE_RETENTION_MINUTES:-60}
+      JOB_HISTORY_DAYS: ${JOB_HISTORY_DAYS:-30}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-50}
+      MAX_FILES_PER_JOB: ${MAX_FILES_PER_JOB:-50}
+      MAX_ACTIVE_JOBS_PER_USER: ${MAX_ACTIVE_JOBS_PER_USER:-10}
+      UPLOAD_RATE_LIMIT: ${UPLOAD_RATE_LIMIT:-30}
+      UPLOAD_RATE_WINDOW_SECONDS: ${UPLOAD_RATE_WINDOW_SECONDS:-60}
+      API_RATE_LIMIT: ${API_RATE_LIMIT:-300}
+      API_RATE_WINDOW_SECONDS: ${API_RATE_WINDOW_SECONDS:-60}
+      AUTH_RATE_LIMIT: ${AUTH_RATE_LIMIT:-10}
+      AUTH_RATE_WINDOW_SECONDS: ${AUTH_RATE_WINDOW_SECONDS:-60}
+      API_KEYS_PER_USER: ${API_KEYS_PER_USER:-10}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    volumes:
+      - storage:/data/storage
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  worker:
+    build: { context: ., dockerfile: docker/Dockerfile.worker }
+    image: nexora-worker
+    restart: unless-stopped
+    environment:
+      <<: *app-env
+      FILE_RETENTION_MINUTES: ${FILE_RETENTION_MINUTES:-60}
+      CLEANUP_ENABLED: ${CLEANUP_ENABLED:-true}
+      CLEANUP_INTERVAL_MINUTES: ${CLEANUP_INTERVAL_MINUTES:-5}
+      JOB_HISTORY_DAYS: ${JOB_HISTORY_DAYS:-30}
+      WORKER_KINDS: ${WORKER_KINDS:-pdf,image}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-2}
+      JOB_TIMEOUT_SECONDS: ${JOB_TIMEOUT_SECONDS:-300}
+      MAX_PDF_PAGES: ${MAX_PDF_PAGES:-300}
+    volumes:
+      - storage:/data/storage
+    # Ghostscript/poppler parse untrusted PDFs: run unprivileged, with no Linux capabilities and no privilege escalation.
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    stop_grace_period: 60s
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      migrate: { condition: service_completed_successfully }
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        API_INTERNAL_URL: http://api:4000
+    image: nexora-web
+    restart: unless-stopped
+    depends_on:
+      api: { condition: service_healthy }
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      NGINX_MAX_BODY_MB: ${NGINX_MAX_BODY_MB:-500}
+    volumes:
+      - ./docker/nginx.conf.template:/etc/nginx/templates/default.conf.template:ro
+    depends_on:
+      web: { condition: service_healthy }
+      api: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
+  storage:

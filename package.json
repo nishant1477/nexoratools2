@@ -1,0 +1,47 @@
+{
+  "name": "nexora-tools",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "workers/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "setup": "sh scripts/init-env.sh",
+    "build:packages": "npm run build -w @nexora/shared && npm run build -w @nexora/config && npm run build -w @nexora/database",
+    "build": "npm run build:packages && npm run build -w @nexora/api && npm run build -w @nexora/worker && npm run build -w @nexora/web",
+    "typecheck": "npm run build:packages && npm run typecheck --workspaces --if-present",
+    "lint": "eslint .",
+    "db:generate": "npm run generate -w @nexora/database",
+    "db:migrate": "npm run migrate:dev -w @nexora/database",
+    "db:deploy": "npm run migrate:deploy -w @nexora/database",
+    "dev:api": "npm run dev -w @nexora/api",
+    "dev:worker": "npm run dev -w @nexora/worker",
+    "dev:web": "npm run dev -w @nexora/web",
+    "start:api": "npm run start -w @nexora/api",
+    "start:worker": "npm run start -w @nexora/worker",
+    "cleanup:once": "npm run cleanup:once -w @nexora/worker",
+    "smoke": "node scripts/smoke.mjs",
+    "test:api": "node tests/api.e2e.mjs",
+    "test:tools": "node tests/tools.e2e.mjs",
+    "test:lifecycle": "node tests/lifecycle.e2e.mjs",
+    "test:keys-admin": "node tests/stage4.e2e.mjs",
+    "test:cleanup": "node tests/cleanup.e2e.mjs",
+    "test:ui": "node tests/ui.e2e.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.14.0",
+    "@sparticuz/chromium": "^153.0.0",
+    "axe-core": "^4.13.0",
+    "eslint": "^9.14.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "puppeteer-core": "^25.12.0",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.13.0"
+  },
+  "type": "module"
+}
