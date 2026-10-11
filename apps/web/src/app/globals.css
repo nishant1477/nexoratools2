@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+/*
+ * NexoraTools design tokens.
+ * Paper-and-ink palette: cool grey-green paper, deep pine for actions, marigold only where
+ * something is being marked up (drop targets, highlights). Dark mode keeps the same roles.
+ */
+:root {
+  --paper: #f3f5f2;
+  --sheet: #ffffff;
+  --sunken: #e9edea;
+  --ink: #16222a;
+  --muted: #55625c;
+  --line: #d6ddd8;
+  --pine: #0e5a4b;
+  --pine-strong: #0a4639;
+  --on-pine: #ffffff;
+  --marigold: #f2b01e;
+  --marigold-soft: #fbeab8;
+  --danger: #b3261e;
+  --danger-soft: #fbe4e2;
+  --ok: #17754f;
+  --ok-soft: #dcf2e7;
+  --warn-soft: #fbeab8;
+  --focus: #0e5a4b;
+  --fold: #cfd8d2;
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  --paper: #0e1b1d;
+  --sheet: #152528;
+  --sunken: #112023;
+  --ink: #e6efeb;
+  --muted: #9bada5;
+  --line: #264044;
+  --pine: #46c2a0;
+  --pine-strong: #62d3b3;
+  --on-pine: #06251e;
+  --marigold: #f2b01e;
+  --marigold-soft: #3a3010;
+  --danger: #ff8d85;
+  --danger-soft: #3b1a1a;
+  --ok: #6fd9a8;
+  --ok-soft: #12332a;
+  --warn-soft: #3a3010;
+  --focus: #f2b01e;
+  --fold: #264044;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-sheet: var(--sheet);
+  --color-sunken: var(--sunken);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-pine: var(--pine);
+  --color-pine-strong: var(--pine-strong);
+  --color-on-pine: var(--on-pine);
+  --color-marigold: var(--marigold);
+  --color-marigold-soft: var(--marigold-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --font-display: 'Bricolage Grotesque Variable', ui-sans-serif, system-ui, sans-serif;
+  --font-sans: 'Instrument Sans Variable', ui-sans-serif, system-ui, sans-serif;
+}
+
+@layer base {
+html { background: var(--paper); }
+body {
+  font-family: var(--font-sans);
+  color: var(--ink);
+  background: var(--paper);
+  font-size: 1rem;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.02em; line-height: 1.1; font-weight: 700; }
+::selection { background: var(--marigold); color: #16222a; }
+
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; border-radius: 4px; }
+}
+
+@layer components {
+/* A sheet of paper with a folded top-right corner: the one repeated motif of the product. */
+.sheet {
+  position: relative;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 10px 0 10px 10px;
+  clip-path: polygon(0 0, calc(100% - 22px) 0, 100% 22px, 100% 100%, 0 100%);
+}
+.sheet::after {
+  content: '';
+  position: absolute; top: 0; right: 0; width: 22px; height: 22px;
+  background: linear-gradient(225deg, transparent 50%, var(--fold) 50%);
+  border-bottom-left-radius: 4px;
+}
+.sheet-link { transition: transform 120ms ease, border-color 120ms ease; }
+.sheet-link:hover { border-color: var(--pine); transform: translateY(-2px); }
+
+/* Print crop marks around drop targets. */
+.crop { position: absolute; width: 16px; height: 16px; border-color: var(--line); transition: border-color 120ms ease; pointer-events: none; }
+.crop-tl { top: -1px; left: -1px; border-top: 2px solid; border-left: 2px solid; }
+.crop-tr { top: -1px; right: -1px; border-top: 2px solid; border-right: 2px solid; }
+.crop-bl { bottom: -1px; left: -1px; border-bottom: 2px solid; border-left: 2px solid; }
+.crop-br { bottom: -1px; right: -1px; border-bottom: 2px solid; border-right: 2px solid; }
+[data-active='true'] > .crop, .drop:hover > .crop, .drop:focus-visible > .crop { border-color: var(--marigold); }
+
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: 2.75rem; padding: 0 1.15rem; border-radius: 8px; font-weight: 600; font-size: 0.95rem;
+  border: 1px solid transparent; cursor: pointer; text-decoration: none; transition: background-color 120ms ease, border-color 120ms ease;
+}
+.btn:disabled, .btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+.btn-primary { background: var(--pine); color: var(--on-pine); }
+.btn-primary:hover:not(:disabled) { background: var(--pine-strong); }
+.btn-quiet { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn-quiet:hover:not(:disabled) { border-color: var(--ink); }
+.btn-danger { background: var(--danger); color: #fff; }
+.btn-sm { min-height: 2.25rem; padding: 0 0.8rem; font-size: 0.875rem; }
+
+.field {
+  width: 100%; min-height: 2.75rem; padding: 0.55rem 0.8rem; border-radius: 8px;
+  background: var(--sheet); border: 1px solid var(--line); color: var(--ink);
+}
+.field:hover { border-color: var(--muted); }
+.field:focus-visible { outline-offset: 0; border-color: var(--focus); }
+.field::placeholder { color: var(--muted); opacity: 0.8; }
+
+.ledger { width: 100%; border-collapse: collapse; font-size: 0.925rem; }
+.ledger th { text-align: left; font-weight: 600; color: var(--muted); padding: 0.6rem 0.75rem; border-bottom: 2px solid var(--ink); white-space: nowrap; }
+.ledger td { padding: 0.75rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.ledger tbody tr:hover { background: color-mix(in srgb, var(--sunken) 60%, transparent); }
+
+@keyframes scan { from { background-position: 0 0; } to { background-position: 32px 0; } }
+.progress-indeterminate {
+  background-image: repeating-linear-gradient(135deg, var(--pine) 0 10px, color-mix(in srgb, var(--pine) 55%, var(--sheet)) 10px 20px);
+  background-size: 32px 100%; animation: scan 900ms linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+}
+.sr-only-focusable:not(:focus) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+}

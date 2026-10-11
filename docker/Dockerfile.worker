@@ -1,0 +1,53 @@
+# syntax=docker/dockerfile:1.7
+# NexoraTools worker: BullMQ consumers + cleanup scheduler. Needs Ghostscript and poppler for PDF tools.
+ARG NODE_IMAGE=node:22-bookworm-slim
+
+# ---------- build ----------
+FROM ${NODE_IMAGE} AS build
+WORKDIR /app
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates openssl \
+ && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY workers/worker/package.json workers/worker/
+COPY packages/shared/package.json packages/shared/
+COPY packages/config/package.json packages/config/
+COPY packages/database/package.json packages/database/
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund
+COPY packages packages
+COPY workers/worker workers/worker
+RUN npm run build:packages && npm run build -w @nexora/worker
+
+# ---------- runtime ----------
+FROM ${NODE_IMAGE} AS runtime
+ENV NODE_ENV=production
+WORKDIR /app
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates openssl ghostscript poppler-utils fonts-urw-base35 fonts-dejavu-core \
+ && rm -rf /var/lib/apt/lists/*
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY apps/api/package.json apps/api/
+COPY apps/web/package.json apps/web/
+COPY workers/worker/package.json workers/worker/
+COPY packages/shared/package.json packages/shared/
+COPY packages/config/package.json packages/config/
+COPY packages/database/package.json packages/database/
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --omit=dev --no-audit --no-fund --include-workspace-root=false \
+      -w @nexora/worker -w @nexora/shared -w @nexora/config -w @nexora/database
+COPY --from=build /app/packages/shared/dist packages/shared/dist
+COPY --from=build /app/packages/config/dist packages/config/dist
+COPY --from=build /app/packages/database/dist packages/database/dist
+COPY --from=build /app/workers/worker/dist workers/worker/dist
+COPY packages/database/prisma packages/database/prisma
+RUN npx prisma generate --schema packages/database/prisma/schema.prisma \
+ && mkdir -p /data/storage && chown -R node:node /data /app
+USER node
+ENV STORAGE_DIR=/data/storage GHOSTSCRIPT_BIN=gs PDFTOPPM_BIN=pdftoppm WORKER_LIVENESS_FILE=/tmp/nexora-worker-alive
+# Healthy = the worker touched its liveness file (every 10 s, only while Redis answers PING).
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+  CMD node -e "process.exit(Date.now()-require('fs').statSync(process.env.WORKER_LIVENESS_FILE).mtimeMs<45000?0:1)"
+STOPSIGNAL SIGTERM
+CMD ["node", "workers/worker/dist/index.js"]

@@ -1,0 +1,152 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["queryCompiler", "driverAdapters"]
+  engineType      = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Plan {
+  FREE
+  PRO
+  BUSINESS
+}
+
+enum JobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+  EXPIRED
+  CANCELLED
+}
+
+enum FileType {
+  INPUT
+  OUTPUT
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String    @unique
+  passwordHash String
+  name         String
+  role         Role      @default(USER)
+  plan         Plan      @default(FREE)
+  disabledAt   DateTime? // set => account cannot sign in or use API keys
+  // Bumped on password change / admin disable so existing sessions stop working.
+  tokenVersion Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  jobs        Job[]
+  apiKeys     ApiKey[]
+  usageEvents UsageEvent[]
+  auditLogs   AuditLog[]   @relation("AuditActor")
+
+  @@index([createdAt])
+}
+
+model Job {
+  id           String    @id @default(uuid())
+  userId       String
+  tool         String // tool id from @nexora/shared registry, e.g. "merge-pdf"
+  status       JobStatus @default(QUEUED)
+  options      Json      @default("{}")
+  errorCode    String?
+  errorMessage String? // safe, user-facing message only; technical detail goes to logs
+  inputSize    BigInt    @default(0)
+  outputSize   BigInt?
+  apiKeyId     String? // set when created through the developer API
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  completedAt  DateTime?
+  expiresAt    DateTime
+
+  user   User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  apiKey ApiKey?  @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+  files  File[]
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([status, createdAt])
+  @@index([expiresAt])
+  @@index([tool])
+}
+
+model File {
+  id         String   @id @default(uuid())
+  jobId      String
+  filename   String // sanitised display name only; NEVER used to build a path
+  storageKey String   @unique // random key, e.g. "inputs/<uuid>.bin"
+  mimeType   String
+  size       BigInt
+  type       FileType
+  position   Int      @default(0) // upload order (merge etc.)
+  expiresAt  DateTime
+  deletedAt  DateTime? // set by cleanup once bytes are removed from storage
+  createdAt  DateTime @default(now())
+
+  job Job @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId])
+  @@index([expiresAt, deletedAt])
+}
+
+model ApiKey {
+  id         String    @id @default(uuid())
+  userId     String
+  name       String
+  keyPrefix  String // first characters, shown in the UI to identify a key
+  keyHash    String    @unique // SHA-256 of the full key; raw key is shown once at creation
+  lastUsedAt DateTime?
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs        Job[]
+  usageEvents UsageEvent[]
+
+  @@index([userId])
+}
+
+/// Usage tracking: one row per billable/limited action (job created, API call, ...).
+model UsageEvent {
+  id        String   @id @default(uuid())
+  userId    String?
+  apiKeyId  String?
+  kind      String // "job.created", "api.request", ...
+  tool      String?
+  bytes     BigInt   @default(0)
+  createdAt DateTime @default(now())
+
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  apiKey ApiKey? @relation(fields: [apiKeyId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([apiKeyId, createdAt])
+  @@index([kind, createdAt])
+}
+
+/// Audit trail for sensitive/admin actions (disable user, revoke key, ...).
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String?
+  action     String
+  targetType String?
+  targetId   String?
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([action, createdAt])
+}

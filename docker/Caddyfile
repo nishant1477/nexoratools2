@@ -1,0 +1,26 @@
+# TLS + reverse proxy for the API only (the web app lives on Vercel). Certificates are issued automatically.
+{
+	servers {
+		# Vercel's edge sets X-Forwarded-For to the real client IP and its addresses are not a fixed range,
+		# so trust it; otherwise every user would share one IP for rate limiting.
+		trusted_proxies static 0.0.0.0/0 ::/0
+	}
+}
+
+{$API_DOMAIN} {
+	request_body {
+		max_size {$MAX_BODY_MB}MB
+	}
+
+	respond /healthz 200
+
+	handle /api/* {
+		reverse_proxy api:4000 {
+			flush_interval -1
+		}
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}
